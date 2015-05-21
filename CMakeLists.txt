@@ -22,8 +22,8 @@ SET(CMAKE_BUILD_TYPE Debug)
 INCLUDE("cmake/PluginConfigure.cmake")
 
 SET(SRC_TackandLay
-            src/TackandLay_pi.h
-            src/TackandLay_pi.cpp
+            src/tackandlay_pi.h
+            src/tackandlay_pi.cpp
 		 src/icons.h
             src/icons.cpp
 		)
