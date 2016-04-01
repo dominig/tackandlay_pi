@@ -47,8 +47,10 @@
 #ifndef PI
 #define PI        3.1415926535897931160E0      /* pi */
 #endif
-#define     MAX_WINDANGLE           60              //row
-#define     MAX_WINDSPEED           15              //colums
+#define     MAX_WINDANGLE_INDEX           36   // row/5°     ~0-180°
+#define     MAX_WINDSPEED_INDEX           30   // colums/2 knt  ~0-60  knt
+#define     MAX_WINDSPEED                 60   // colums/2 knt  ~0-60  knt
+#define     MAX_PT_BULLETS               600    // // 10 X 60 Max number of points on Polar graph
 
 //    Forward definitions
 
@@ -115,13 +117,15 @@ public:
     bool LoadConfig(void);
     bool SaveConfig(void);
     bool SetCellValue(int i_TWA,int i_TWS, double boat_speed);
+    void read_Polar_Data_mode1(const wxArrayString& WS, const wxArrayString& WWS);
+    void read_Polar_Data_mode2(const wxArrayString& WS);
 
     bool TnLactive;
-    struct pol {              // 15 wind speeds X 60 TWA's
+    struct pol {              //  wind speeds X  TWA's
         int TWS;
-        int	TWA[MAX_WINDANGLE];
-        double boat_speed[MAX_WINDANGLE];
-    } Master_pol[MAX_WINDSPEED];
+        int    TWA[MAX_WINDANGLE_INDEX];
+        double boat_speed[MAX_WINDANGLE_INDEX];
+    } Master_pol[MAX_WINDSPEED_INDEX];
 
     bool Master_pol_loaded;
 
@@ -185,18 +189,18 @@ private:
     wxWindow        *pParent;
     tackandlay_pi   *pProgram;
 
-    wxColour		windColour[15];
+    wxColour        windColour[MAX_WINDSPEED_INDEX];
     wxBoxSizer      *bSizerNotebook;
     wxNotebook      *m_notebook;
     wxPanel         *m_panelPolar;
     wxDC            *dc;
 
-    wxSize			max_dimension;
+    wxSize          max_dimension;
     wxPoint         center;
-    int				radius;
-    double			image_pixel_height[24];                 // display height in pixels
+    int             radius;
+    double          image_pixel_height[24];                 // display height in pixels
     int             display_speed;
-    double			pixels_knot_ratio;
+    double          pixels_knot_ratio;
     double          number;
     int             i_wspd;
     int             j_wdir;

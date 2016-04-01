@@ -68,20 +68,20 @@ double tack_angle, lay_angle;
 double lgth_line;
 
 struct wind {
-    double TWA;
-    double RWA;
-    double TWS;
-    double RWS;
-    double TWD;
+    double TWA;     // True Wind Angle - angle of the boat to the wind
+    double RWA;     // Raw Relative Wind Angle
+    double TWS;     // True Wind Speed
+    double RWS;     // Raw Relative Wind Speed
+    double TWD;     // True Wind Direction
 } Wind;
 
 struct boat {
-    double SOG;
-    double COG;
-    double STW;
-    double HDG;
-    double HDGM;
-} Boat;
+    double SOG;     // Speed over Ground 
+    double COG;     // Course over Ground
+    double STW;     // Speed Through Water
+    double HDG;     // heading True
+    double HDGM;    // heading Magnetic
+} Boat;             // BSP=boat speed in knots
 
 bool  tnl_shown_dc_message;
 
@@ -251,19 +251,7 @@ void tackandlay_pi::ShowPreferencesDialog(  wxWindow* parent )
     }
 }
 
-//******************************************************************************
-// Compatibility layer to enable reuse of polar_pi code
-// to read polar files
-bool tackandlay_pi::SetCellValue(int i_TWA, int i_TWS, double boat_speed)
-{
-    if (i_TWA > MAX_WINDANGLE || i_TWS > MAX_WINDSPEED) return false;
-    Master_pol[i_TWS].TWS = i_TWS*5;       //this data model keeps polar data consistant with polar_pi
-    Master_pol[0].TWA[i_TWA] = (i_TWA+1)*5;
-    Master_pol[i_TWS].boat_speed[i_TWA] = boat_speed;
-    Master_pol_loaded = true;               //some data have been loaded.
-    return true;
-}
-//*******************************************************************************
+// *******************************************************************************
 // ToolBar Actions
 
 int tackandlay_pi::GetToolbarToolCount(void)
@@ -290,8 +278,8 @@ void tackandlay_pi::OnToolbarToolCallback(int id)
             wxMessageBox(File_message);
             load_POL_file(m_filename);
             if(m_pOptionsDialog != NULL && Master_pol_loaded == true) {
-                m_pOptionsDialog->Show();
-                m_pOptionsDialog->Refresh();
+               m_pOptionsDialog->Show();
+               m_pOptionsDialog->Refresh();
             }
         }
         if (!Master_pol_loaded) {                 // no valid polar data have been read
@@ -350,23 +338,84 @@ bool tackandlay_pi::SaveConfig(void)
     } else
         return false;
 }
+/* Reading Polar file helpers */
 
 void tackandlay_pi::clear_Master_pol()
 {
-    for(int i = 0; i < MAX_WINDSPEED; i++) {
+    for(int i = 0; i < MAX_WINDSPEED_INDEX; i++) {
         Master_pol[i].TWS = 0;
 
-        for(int n = 0; n < MAX_WINDANGLE; n++) {
+        for(int n = 0; n < MAX_WINDANGLE_INDEX; n++) {
             Master_pol[i].TWA[n] = 0;
             Master_pol[i].boat_speed[n] = 0;
-
         }
     }
 }
 
-void tackandlay_pi::load_POL_file(wxString file_name)
-// this code has been change to allow almost a direct cut and paste
+bool tackandlay_pi::SetCellValue(int twa, int tws, double bsp)
+{
+    int twa_i, tws_i;
+    
+    twa_i = ((twa + 2) / (180/MAX_WINDANGLE_INDEX)) - 1;//conversion of the angle read in the file in index
+    tws_i = ((tws + 2) / (MAX_WINDSPEED/MAX_WINDSPEED_INDEX)) - 1;//conversion of the angle read in the file in index
+    if (twa_i >= MAX_WINDANGLE_INDEX || tws_i >= MAX_WINDSPEED_INDEX) return false;
+    
+    Master_pol[tws_i].TWS = tws;       //this data model keeps polar data consistant with polar_pi
+    Master_pol[tws_i].TWA[twa_i] = twa;
+    Master_pol[tws_i].boat_speed[twa_i] = bsp;
+    Master_pol_loaded = true;               //some data have been loaded.
+    return true;
+}
+
+void tackandlay_pi::read_Polar_Data_mode1(const wxArrayString& WSS, const wxArrayString& WS)       //  qtVLM OpenCPN Polar file format
+    // WS  contains the first line of the file with the TWS
+    // WSS contains the current line with TWA [BSP]
+{
+    double bsp;               //boat speed
+    int twa, tws;             // true wind angle, true wind speed
+    int  i;
+    wxString bsp_s;           // boat speed as text
+    
+    for (i = 1; i < (int) WS.GetCount(); i++) {
+        if (i >= (int) WSS.GetCount())   break;        // file format error WS and WSS do not match in number of item
+        
+        bsp_s = WS[i];
+        tws= wxAtoi(WSS[i]);                           // TWA is kept in the first line
+        twa= wxAtoi(WS[0]);                            // TWA is kept in the first line of the file
+        if(bsp_s == _T("0") || bsp_s == _T("0.00") || bsp_s == _T("0.0") || bsp_s == _T("0.000")) {
+            continue;                           // No data
+        }
+        bsp_s.ToDouble(&bsp);
+        SetCellValue(twa,tws,bsp);
+    }
+}
+
+void tackandlay_pi::read_Polar_Data_mode2(const wxArrayString& WS)       // Bluewater Racing, and Expedition Polar file format
+{
+    double bsp;               //boat speed
+    int twa, tws;             // true wind angle, true wind speed
+    int  i;
+    wxString bsp_s;           //boat speed as text
+    
+    tws = wxAtoi(WS[0]);      // tws is the first item of each line
+    twa = (tws + 1)/2 - 1;
+    
+    for (i = 1; i < (int) WS.GetCount(); i += 2 ) {  // format is TWS [TWA, BSP]
+        twa = wxAtoi(WS[i]);
+        bsp_s = WS[i+1];
+        if(bsp_s == _T("0") || bsp_s == _T("0.00") || bsp_s == _T("0.0") || bsp_s == _T("0.000")) {
+            continue;                           // No data
+        }
+        bsp_s.ToDouble(&bsp);
+        SetCellValue(twa,tws,bsp);
+    }
+}
+        
+// Follwing code is inspired from polar_pi
 // from polar_pi see Polar::loadPolar() in Polar.cpp ~line 1120
+// Info on both type of polar file see http://opencpn.org/ocpn/Plugins_external_weather_routing_conversion
+        
+void tackandlay_pi::load_POL_file(const wxString file_name)
 {
     if (!file_name.IsEmpty()) {
         clear_Master_pol();
@@ -374,103 +423,51 @@ void tackandlay_pi::load_POL_file(wxString file_name)
         wxFileInputStream stream(file_name);
         wxTextInputStream in(stream);
         wxString wdirstr, wsp;
-        double boat_speed;
+//        double bsp;                                             //boat speed
+//        int twa_i = -1                                          // true wind angle index
         bool first = true;
-        int mode = -1, row = -1, sep = -1;
+        int mode = -1;                                             // init to unknown format
         wxArrayString WS, WSS;
 
         while(!stream.Eof()) {
-            int col = 0, i = 0, x = 0;
-            wxString s;
+  //          int twa = 0, tws = 0;                               // true wind angle, true wind speed
+  //          int  i = 0;
+  //          wxString bsp_s;                                     //boat speed as text
 
-            wxString str = in.ReadLine();				// read line by line
+            wxString str = in.ReadLine();			// read line by line
             if(stream.Eof()) break;
             if(first) {
-                WS = wxStringTokenize(str,_T(";,\t "));
+                WS = wxStringTokenize(str,_T(";,\t "));         // Decimal point is the only supported BSP coding
                 WS[0] = WS[0].Upper();
                 if(WS[0].Find(_T("TWA\\TWS")) != -1 || WS[0].Find(_T("TWA/TWS")) != -1 || WS[0].Find(_T("TWA")) != -1) {
-                    mode = 1;
-                    sep = 1;
+                    mode = 1;                                  // OpenCPN, qtVLM Polar file format
+                    WSS=WS;                                    // saving the TWA line to match BSP later 
                 } else if(WS[0].IsNumber()) {
-                    mode = 2;
-                    sep = 1;
-                    x = wxAtoi(WS[0]);
-                    col = (x + 1)/2 - 1;
-                    for (i = 1; i < (int) WS.GetCount(); i += 2 ) {
-                        x = wxAtoi(WS[i]);
-                        row = (x + 2) / 5 - 1;          //conversion of the angle read in the file in row
-                        s = WS[i+1];
-                        if(col > MAX_WINDSPEED) break;
-                        if(s == _T("0") || s == _T("0.00") || s == _T("0.0") || s == _T("0.000")) {
-                            continue;
-                        }
-                        if(col < MAX_WINDSPEED) {
-                            s.ToDouble(&boat_speed);
-                            SetCellValue(row,col,boat_speed);
-                            // setValue(s,row,col,true); //TODO something managing non provided value would be useful
-                        }
-                    }
-                } else if(!WS[0].IsNumber()) {
-                    continue;
-                }
-
-                if( sep == -1) {
+                    mode = 2;                                  // Bluewater Racing, and Expedition Polar file format
+                    read_Polar_Data_mode2 (WS);
+                  } 
+                  else if(!WS[0].IsNumber()) continue;     // ignore comment lines
+                  
+                  
+                if(mode == -1) {
                     wxMessageBox(_("Format in this file not recognised"));
                     return;
-                }
-
-                first = false;
-                if( mode != 0)
+                } else  {
+                    first = false;
                     continue;
-            }
-
-            if ( mode == 1 ) { // Formats OCPN/QTVlm/MAXSea/CVS
-                WSS = wxStringTokenize(str,_T(";,\t "));
-                if(WSS[0] == _T("0") && mode == 1) {
-                    row++;
-                    continue;
-                } else if(row == -1)
-                    row++;
-
-                x = wxAtoi(WSS[0]);
-                row = (x + 2) / 5 - 1;
-
-                for (i = 1; i < (int) WSS.GetCount(); i++) {
-                    s = WSS[i];
-                    if(col > MAX_WINDSPEED) break;
-                    if(s == _T("0") || s == _T("0.00") || s == _T("0.0") || s == _T("0.000")) {
-                        continue;
-                    }
-                    x = wxAtoi(WS[i]);
-                    if( (x % 2) == 0) {
-                        col = x/2 - 1;
-                        if(col < MAX_WINDSPEED) {
-                            s.ToDouble(&boat_speed);
-                            SetCellValue(row,col,boat_speed);
-                            // setValue(s,row,col++,true); //TODO something managing non provided value would be useful
-                        }
-                    }
                 }
             }
+            if ( mode == 1 ) {                          // Formats OCPN/QTVlm/MAXSea/CVS
+                WS = wxStringTokenize(str,_T(";,\t "));
+                if(WS[0] == _T("0") && mode == 1) {    // expect to read TWA first
+                    continue;
+                }
+                read_Polar_Data_mode1 (WSS, WS);
+             }
 
             if ( mode == 2 ) { // Format Expedition
                 WS = wxStringTokenize(str,_T(";,\t "));
-                x = wxAtoi(WS[0]);
-                col = (x + 1)/2 - 1;
-                for (i = 1; i < (int) WS.GetCount(); i += 2 ) {
-                    x = wxAtoi(WS[i]);
-                    row = (x + 2) / 5 - 1;
-                    s = WS[i+1];
-                    if(col > MAX_WINDSPEED) break;
-                    if(s == _T("0") || s == _T("0.00") || s == _T("0.0") || s == _T("0.000")) {
-                        continue;
-                    }
-                    if(col < MAX_WINDSPEED) {
-                        s.ToDouble(&boat_speed);
-                        SetCellValue(row,col,boat_speed);
-                        // setValue(s,row,col,true); //TODO something managing non provided value would be useful
-                    }
-                }
+                read_Polar_Data_mode2 (WS);
             }
         }
     }
@@ -607,12 +604,12 @@ bool tackandlay_pi::RenderGLOverlay(wxGLContext *pcontext, PlugIn_ViewPort *vp)
                 if (Wind.TWD > 360) Wind.TWD = Wind.TWD - 360;
                 Draw_Wind_Barb(boat_center, Wind.TWD, Wind.TWS);
 
-                if(Wind.TWA < 90 || Wind.TWA > 270) { // Wind forward
+                if(Wind.TWA <= 90 || Wind.TWA > 270) { // Wind forward
                     tack_angle =  TWA_for_Max_Tack_VMG(Wind.TWS);
                     glColor4ub(0, 255, 0, 255);
                 }
 
-                if(Wind.TWA > 90 && Wind.TWA < 270) {
+                if(Wind.TWA > 90 && Wind.TWA <= 270) {
                     tack_angle =  TWA_for_Max_Run_VMG(Wind.TWS);
                     glColor4ub(0, 255, 255, 255);
                 }
@@ -675,22 +672,22 @@ double tackandlay_pi::Calc_VMG_C(double COG, double SOG, double BTM)
 double tackandlay_pi::interpret_Polar_boat_speed (double TWS, double TWA)
 {
     double first_boat_speed, second_boat_speed;
-    int first_TWA=-1, second_TWA=-1, first_wdir=-1, first_wspd=-1;
+    int first_TWA=-1, second_TWA=-1, first_wdir=-1, first_wspd=-1;   // init just to avoid gcc warning
 
-    for (j_wdir = 0; j_wdir < MAX_WINDANGLE ; j_wdir++) {
+    for (j_wdir = 0; j_wdir < MAX_WINDANGLE_INDEX ; j_wdir++) {
         if ( Master_pol[0].TWA[j_wdir] < TWA) { // next lower TWA
             first_TWA = Master_pol[0].TWA[j_wdir];
             first_wdir = j_wdir;
-        } else j_wdir = MAX_WINDANGLE;
+        } else j_wdir = MAX_WINDANGLE_INDEX;
     }
     second_TWA = Master_pol[0].TWA[first_wdir + 1];
 
-    for (i_wspd = 0; i_wspd < MAX_WINDSPEED ; i_wspd++) { // get next lower TWS
+    for (i_wspd = 0; i_wspd < MAX_WINDSPEED_INDEX ; i_wspd++) { // get next lower TWS
         if(Master_pol[i_wspd].TWS < TWS)
             first_wspd = i_wspd;
 
         else
-            i_wspd = MAX_WINDSPEED;
+            i_wspd = MAX_WINDSPEED_INDEX;
     }
 
     first_boat_speed = Master_pol[first_wspd].boat_speed[first_wdir];
@@ -708,7 +705,7 @@ double tackandlay_pi::TWA_for_Max_VMG_to_Mark(double TWS, double TWD, double BTM
     int pol_TWA=-1, max_TWA=-1;
     int i_wspd =-1;
 
-    for (int i = 0; i < MAX_WINDSPEED; i++) {          // Find current wind speed index
+    for (int i = 0; i < MAX_WINDSPEED_INDEX; i++) {          // Find current wind speed index
         if (Master_pol[i].TWS < TWS)
             i_wspd = i + 1;
     }
@@ -751,14 +748,14 @@ double tackandlay_pi::TWA_for_Max_Tack_VMG(double TWS)
 {
     double pol_speed, max_speed = 0;
     int pol_TWA=-1, max_TWA=-1;
-    int i_wspd=-1;
+    int i_wspd;
 
-    for (int i = 0; i < MAX_WINDSPEED; i++) {          // Find current wind speed index
-        if (Master_pol[i].TWS < TWS)
-            i_wspd = i;
+    for (i_wspd = 0; i_wspd < MAX_WINDSPEED_INDEX; i_wspd++) {          // Find current wind speed index
+        if (Master_pol[i_wspd].TWS < TWS)
+            break;
     }
 
-    for (int j_wdir = 0; j_wdir < 30 ; j_wdir++) { // 0-90 deg TWA
+    for (j_wdir = 0; j_wdir < 30 ; j_wdir++) { // 0-90 deg TWA
         pol_speed = Master_pol[i_wspd].boat_speed[j_wdir];
         pol_TWA = Master_pol[0].TWA[j_wdir];
 
@@ -777,11 +774,11 @@ double tackandlay_pi::TWA_for_Max_Run_VMG(double TWS)
 {
     double pol_speed, max_speed = 0;
     int pol_TWA=-1, max_TWA=-1;
-    int i_wspd=-1;
+    int i_wspd;
 
-    for (int i = 0; i < MAX_WINDSPEED; i++) {          // Find current wind speed index
-        if (Master_pol[i].TWS < TWS)
-            i_wspd = i;
+    for (i_wspd = 0; i_wspd < MAX_WINDSPEED_INDEX; i_wspd++) {          // Find current wind speed index
+        if (Master_pol[i_wspd].TWS < TWS)
+            break;
     }
 
     for (j_wdir = 59; j_wdir >= 30; j_wdir--) { // 180 -> 90 deg TWA
@@ -981,7 +978,7 @@ bool TnLDisplayOptionsDialog::Create( wxWindow *parent, tackandlay_pi *ppi )
     topSizer->Add(bSizerNotebook);
 
 // provide a button to close the Polar window
-    wxStdDialogButtonSizer* DialogButtonSizer = wxDialog::CreateStdDialogButtonSizer(wxOK|wxCANCEL);
+    wxStdDialogButtonSizer* DialogButtonSizer = wxDialog::CreateStdDialogButtonSizer(wxCLOSE);
     topSizer->Add(DialogButtonSizer, 0, wxALIGN_RIGHT|wxALL, 5);
 
     this->Layout();
@@ -1043,27 +1040,28 @@ void TnLDisplayOptionsDialog::Render_Polar()
 void TnLDisplayOptionsDialog::createSpeedBullets()
 {
     int xt, yt, bullet_point_count;
-    wxPoint ptBullets[600];             // max of 10 X 60
+    wxPoint ptBullets[MAX_PT_BULLETS];             
 
     wxColour Colour,brush;
     wxPen init_pen = dc->GetPen();			// get actual Pen for restoring later
 
-    for(int i_wspd = 0; i_wspd < 15; i_wspd++) { // go thru all wind speeds
+    for(int tws_i = 0; tws_i < MAX_WINDSPEED_INDEX; tws_i++) { // go thru all wind speeds
         bullet_point_count = 0;
-        Colour = windColour[i_wspd];
-        brush = windColour[i_wspd];
+        Colour = windColour[tws_i];
+        brush = windColour[tws_i];
 
-        for(int j_wdir = 0; j_wdir < 60; j_wdir++) {        // min-> max (180 deg)
-            double boat_speed = pProgram->Master_pol[i_wspd].boat_speed[j_wdir];
+        for(int twa_i = 0; twa_i < MAX_WINDANGLE_INDEX; twa_i++) {        // min-> max (180 deg)
+            double boat_speed = pProgram->Master_pol[tws_i].boat_speed[twa_i];
             if( boat_speed > 0) {
                 double speed_in_pixels = boat_speed * pixels_knot_ratio;
-                double wind_angle = pProgram->Master_pol[0].TWA[j_wdir];
+                double wind_angle = pProgram->Master_pol[tws_i].TWA[twa_i];
 
                 xt = wxRound(cos((wind_angle- 90)*PI/180)*speed_in_pixels + center.x);		// calculate the point for the bullet
                 yt = wxRound(sin((wind_angle- 90)*PI/180)*speed_in_pixels + center.y);
 
                 wxPoint pt(xt,yt);
-                ptBullets[bullet_point_count++] = pt;      // Add to display array
+                if (bullet_point_count < MAX_PT_BULLETS)       // avoid buffer overrun
+                    ptBullets[bullet_point_count++] = pt;      // Add to display array
             }
         }
 
@@ -1072,15 +1070,15 @@ void TnLDisplayOptionsDialog::createSpeedBullets()
         if(bullet_point_count > 2) {				//Draw curves, needs min. 3 points
             dc->SetPen(wxPen(Colour,3));
             dc->DrawSpline(bullet_point_count,ptBullets);
-        }
-
-        for(int i = 0; i < bullet_point_count; i++) {   // draw the bullet
-            if(ptBullets[i].x != 0 && ptBullets[i].y != 0) {
-                dc->SetBrush( brush );
-                dc->SetPen(wxPen(wxColour(0,0,0),2));
-                dc->DrawCircle(ptBullets[i],5);
-                ptBullets[i].x = 0;
-                ptBullets[i].y = 0;
+        
+            for(int i = 0; i < bullet_point_count; i++) {   // draw the bullet
+                if(ptBullets[i].x != 0 && ptBullets[i].y != 0) {
+                    dc->SetBrush( brush );
+                    dc->SetPen(wxPen(wxColour(0,0,0),2));
+                    dc->DrawCircle(ptBullets[i],5);
+                    ptBullets[i].x = 0;
+                    ptBullets[i].y = 0;
+                }
             }
         }
     }
